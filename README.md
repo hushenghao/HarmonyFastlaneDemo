@@ -227,7 +227,7 @@ hvigorw assembleApp --mode project -p product=default -p buildMode=release --no-
 
 项目级的 build-profile.json5 用于控制 App 的生成名称
 
-```json
+```json5
 {
   "app": {
     "products": [
@@ -245,7 +245,7 @@ hvigorw assembleApp --mode project -p product=default -p buildMode=release --no-
 
 module 级的 build-profile.json5 用于控制 Hap 的文件名
 
-```json
+```json5
 {
   "apiType": "stageMode",
   // ...
@@ -389,7 +389,7 @@ minio 提供了 `mc` 命令行工具，对文件服务的访问和管理，我�
 
 再次运行 `fastlane build_hap` lane，构建并上传成功
 
-```shell
+```log
 +------------------------------------------------------------------------------------+
 |                                  fastlane summary                                  |
 +------+---------------------------------------------------------------+-------------+
@@ -495,7 +495,7 @@ end
 
 这里出于演示手动设置了 HM_COMMAND_LINE_TOOLS_REPO 环境变量
 
-```shell
+```text
 export HM_COMMAND_LINE_TOOLS_REPO="/Users/dede/Downloads/hm_cmdline_tools_repo"
 
 // 此路径结构如下
@@ -541,7 +541,7 @@ fastlane build_hap
 
 可以看到，命令行工具解压设置环境变量并成功构建了。可以看出unzip是比较耗时的，所以这里对已经解压过的版本进行了复用，加快构建速度。
 
-### 完整的Fastfile
+### 完整的 Fastfile
 
 ```ruby
 # 命令行工具
@@ -667,9 +667,17 @@ end
 
 到这里 fastlane 在鸿蒙上的应用就结束了，对鸿蒙的命令行工具和打包工具进行了一次大胆结合，并成功应用。目前公司项目已经使用此方案在Jenkins上进行了部署，目前没有发现问题。
 
-### 参考资料
+可以基于此进行再次扩展，例如：
+
+* 添加参数化构建，根据入参支持 Hap 和 App 的构建，和 product 选择
+* 添加其他分发平台的上传，例如 svn、蒲公英（目前不支持）等
+* 添加Release包的mapping文件托管，用于排查混淆问题
+* 等等
+
+### 相关链接
 
 * [fastlane docs](https://docs.fastlane.tools/)
 * [配置多目标产物](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V5/ide-customized-multi-targets-and-products-guides-V5)
 * [灵活定制编译选项](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V5/ide-hvigor-compilation-options-customizing-guide-V5)
 * [搭建流水线](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V5/ide-command-line-building-app-V5)
+* [Demo 仓库](https://github.com/hushenghao/HarmonyFastlaneDemo)
