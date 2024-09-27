@@ -1,0 +1,132 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+# 命令行工具
+COMMAND_LINE_TOOLS_PLATFORM = "mac-arm64"# 打包机的平台架构
+COMMAND_LINE_TOOLS_VERSION = "5.0.3.810"
+# 依赖环境变量 HM_COMMAND_LINE_TOOLS_REPO 配置的命令行仓库路径
+# 如果需要新版本，就将新下载的zip包放到此路径下
+
+default_platform(:harmony)
+
+platform :harmony do
+  desc "构建环境准备"
+  private_lane :prepare do
+    command_line_tools_repo = ENV["HM_COMMAND_LINE_TOOLS_REPO"]
+    puts "$HM_COMMAND_LINE_TOOLS_REPO: #{command_line_tools_repo}"
+    if !command_line_tools_repo.nil? # 没有HM_COMMAND_LINE_TOOLS_REPO环境变量就使用系统命令行工具
+      command_line_tools_zip = File::join(command_line_tools_repo, "commandline-tools-#{COMMAND_LINE_TOOLS_PLATFORM}-#{COMMAND_LINE_TOOLS_VERSION}.zip")
+      command_line_tools_unzip = File::join(command_line_tools_repo, "unzip", COMMAND_LINE_TOOLS_VERSION)
+      command_line_tools_home = File::join(command_line_tools_unzip, "command-line-tools")
+      if !File::exist?(command_line_tools_home)
+        if !File::exist?(command_line_tools_unzip)
+          sh "mkdir -p #{command_line_tools_unzip}"
+        end
+
+        sh "unzip #{command_line_tools_zip} -d #{command_line_tools_unzip}"
+      end
+      # 更新环境变量
+      ENV["NODE_HOME"] = "#{command_line_tools_home}/tool/node"
+      ENV["PATH"] = "#{command_line_tools_home}/bin:$NODE_HOME/bin:#{ENV["PATH"]}"
+      puts "$PATH: #{ENV["PATH"]}"
+    end
+
+    sh "java --version"
+    sh "ohpm -v"
+    Dir.chdir("../") do
+      sh("ohpm install --all")
+    end
+    hvigor(args: ["-v"])
+  end
+
+  desc "hvigor 命令行"
+  private_lane :hvigor do |options|
+    task = options[:task]
+    product = options[:product]
+    build_mode = options[:build_mode]
+    args = options[:args]
+    if args.nil?
+      args = []
+    end
+    if !product.nil?
+      args = args + ["-p", "product=#{product}"]
+    end
+    if !build_mode.nil?
+      args = args + ["-p", "buildMode=#{build_mode}"]
+    end
+    if task.nil?
+      cmds = ["hvigorw"] + args
+    else
+      cmds = ["hvigorw", task] + args
+    end
+    # 指定工作路径，fastlane 路径上一级，也就是项目的根路径
+    Dir.chdir("../") do
+      sh cmds
+    end
+  end
+
+  desc "上传文件到MinIO file_path: 文件路径, remote_path: 上传文件夹路径"
+  lane :upload_to_minio do |options|
+    file_path = options[:file_path]
+    remote_path = options[:remote_path]
+    if !File::exist?(file_path)
+      puts "⚠️ Upload to MinIO file not exist: #{file_path}"
+      next
+    end
+    file_name = File::basename(file_path)
+    sh("mc", "cp", file_path, "#{remote_path}/#{file_name}")
+  end
+
+  desc "Hap打包"
+  lane :build_hap do
+    prepare
+
+    hvigor(task: "clean")
+    hvigor(
+      task: "assembleHap",
+      product: "default",
+      build_mode: "release",
+      args: ["--mode", "module", "--no-daemon"],
+    )
+
+    # 在module级的build-profile.json5中指定产物名称
+    # "output": { "artifactName": "hm_fastlane_demo" }
+    hap_path = File::expand_path("../entry/build/default/outputs/default/hm_fastlane_demo-unsigned.hap")
+    # 获取版本号
+    version_name = JSON.parse(File.read("../AppScope/app.json5"))["app"]["versionName"]
+    # 重命名
+    hap_name = "#{File::basename(hap_path, ".hap")}_#{version_name}.hap"
+    new_hap_path = File::join(File::dirname(hap_path), hap_name)
+    File::rename(hap_path, new_hap_path)
+    puts "Build output: #{new_hap_path}"
+
+    # 上传minio
+    upload_to_minio(
+      file_path: new_hap_path,
+      remote_path: "internal/harmony",
+    )
+    
+    # 发送消息通知
+    push_msg(
+      message: "打包成功",
+      url: "下载地址"
+    )
+  end
+
+  lane :push_msg do |options|
+    puts "发送消息"
+    # todo
+  end
+end
