@@ -71,10 +71,30 @@ platform :harmony do
     else
       cmds = ["hvigorw", task] + args
     end
+
     # 指定工作路径，fastlane 路径上一级，也就是项目的根路径
-    Dir.chdir("../") do
-      sh cmds
+    project_dir = "../"
+    Dir.chdir(project_dir) do
+      sh(*cmds)
     end
+
+    # 只处理打包task
+    if !(task =~ /\b(assemble)/)
+      next
+    end
+
+    # hap_path = File::expand_path("../entry/build/default/outputs/default/hm_fastlane_demo-unsigned.hap")
+    # app_path = File::expand_path("../build/outputs/default/hm_fastlane_demo-unsigned.app")
+    hap_search_path = File.join(project_dir, "**", "build", "**", "outputs", "**", "*.hap")
+    app_search_path = File.join(project_dir, "build", "outputs", "**", "*.app")
+    new_haps = Dir[hap_search_path].map { |path| File.expand_path(path) }
+    new_apps = Dir[app_search_path].map { |path| File.expand_path(path) }
+    
+    last_hap_path = new_haps.sort_by(&File.method(:mtime)).last
+    last_app_path = new_apps.sort_by(&File.method(:mtime)).last
+
+    Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH] = File.expand_path(last_hap_path) if last_hap_path
+    Actions.lane_context[:HVIGOR_APP_OUTPUT_PATH] = File.expand_path(last_app_path) if last_app_path
   end
 
   desc "上传文件到MinIO file_path: 文件路径, remote_path: 上传文件夹路径"
@@ -101,9 +121,7 @@ platform :harmony do
       args: ["--mode", "module", "--no-daemon"],
     )
 
-    # 在module级的build-profile.json5中指定产物名称
-    # "output": { "artifactName": "hm_fastlane_demo" }
-    hap_path = File::expand_path("../entry/build/default/outputs/default/hm_fastlane_demo-unsigned.hap")
+    hap_path = Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH]
     # 获取版本号
     version_name = JSON.parse(File.read("../AppScope/app.json5"))["app"]["versionName"]
     # 重命名

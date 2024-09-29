@@ -292,7 +292,7 @@ platform :harmony do
     end
     # 指定工作路径，fastlane 路径上一级，也就是项目的根路径
     Dir.chdir("../") do 
-      sh cmds
+      sh(*cmds)
     end
   end
 
@@ -317,15 +317,18 @@ end
 运行 `fastlane build_hap` 查看结果，发现成功运行了。
 
 ```log
-+------+-------------------------------+-------------+
-| Step | Action                        | Time (in s) |
-+------+-------------------------------+-------------+
-| 1    | default_platform              | 0           |
-| 2    | Switch to harmony hvigor lane | 0           |
-| 3    | hvigorw                       | 1           |
-| 4    | Switch to harmony hvigor lane | 0           |
-| 5    | hvigorw                       | 5           |
-+------+-------------------------------+-------------+
++------------------------------------------------------------------------------------+
+|                                  fastlane summary                                  |
++------+---------------------------------------------------------------+-------------+
+| Step | Action                                                        | Time (in s) |
++------+---------------------------------------------------------------+-------------+
+| 1    | default_platform                                              | 0           |
+| 2    | ohpm install --all                                            | 0           |
+| 3    | Switch to harmony hvigor lane                                 | 0           |
+| 4    | hvigorw clean                                                 | 0           |
+| 5    | Switch to harmony hvigor lane                                 | 0           |
+| 6    | hvigorw assembleHap --mode module --no-daemon -p product\=def | 4           |
++------+---------------------------------------------------------------+-------------+
 
 [14:56:39]: fastlane.tools finished successfully 🎉
 ```
@@ -398,9 +401,9 @@ minio 提供了 `mc` 命令行工具，对文件服务的访问和管理，我�
 | 1    | default_platform                                              | 0           |
 | 2    | ohpm install --all                                            | 0           |
 | 3    | Switch to harmony hvigor lane                                 | 0           |
-| 4    | hvigorw                                                       | 0           |
+| 4    | hvigorw clean                                                 | 0           |
 | 5    | Switch to harmony hvigor lane                                 | 0           |
-| 6    | hvigorw                                                       | 6           |
+| 6    | hvigorw assembleHap --mode module --no-daemon -p product\=def | 4           |
 | 7    | Switch to harmony upload_to_minio lane                        | 0           |
 | 8    | mc cp /Users/dede/Workspace/Fake/HarmonyFastlaneDemo/entry/bu | 0           |
 +------+---------------------------------------------------------------+-------------+
@@ -413,6 +416,74 @@ minio 提供了 `mc` 命令行工具，对文件服务的访问和管理，我�
 上传成功后面我们可以添加消息通知，例如钉钉机器人消息，通知到我们的其他小伙伴
 
 ## 更进一步
+
+### 支持hvigor产物输出
+
+上面的hvigor命令的产物是我们写死的路径，这样就导致了一个问题，如果我们的项目结构变更了，或者添加了新的product类型，就需要同步修改我们的fastlane脚本，存在一定的维护成本
+
+通过阅读文档发现 fastlane [gradle](https://docs.fastlane.tools/actions/gradle/#lane-variables) action 支持产物的输出：
+
+* SharedValues::GRADLE_APK_OUTPUT_PATH
+* SharedValues::GRADLE_AAB_OUTPUT_PATH
+* ...
+
+所以我们可以参考 [gradle.rb](https://github.com/fastlane/fastlane/blob/master/fastlane/lib/fastlane/actions/gradle.rb) 的实现增强一下我们的 `hvigor` lane，让它支持编译产物的输出
+
+```ruby
+  desc "hvigor 命令行"
+  private_lane :hvigor do |options|
+    task = options[:task]
+    product = options[:product]
+    build_mode = options[:build_mode]
+    args = options[:args]
+    if args.nil?
+      args = []
+    end
+    if !product.nil?
+      args = args + ["-p", "product=#{product}"]
+    end
+    if !build_mode.nil?
+      args = args + ["-p", "buildMode=#{build_mode}"]
+    end
+    if task.nil?
+      cmds = ["hvigorw"] + args
+    else
+      cmds = ["hvigorw", task] + args
+    end
+
+    # 指定工作路径，fastlane 路径上一级，也就是项目的根路径
+    project_dir = "../"
+    Dir.chdir(project_dir) do
+      sh(*cmds)
+    end
+    
+    # 只处理打包task
+    if !(task =~ /\b(assemble)/)
+      next
+    end
+    
+    # hap_path = File::expand_path("../entry/build/default/outputs/default/hm_fastlane_demo-unsigned.hap")
+    # app_path = File::expand_path("../build/outputs/default/hm_fastlane_demo-unsigned.app")
+    hap_search_path = File.join(project_dir, "**", "build", "**", "outputs", "**", "*.hap")
+    app_search_path = File.join(project_dir, "build", "outputs", "**", "*.app")
+    new_haps = Dir[hap_search_path].map { |path| File.expand_path(path) }
+    new_apps = Dir[app_search_path].map { |path| File.expand_path(path) }
+    
+    last_hap_path = new_haps.sort_by(&File.method(:mtime)).last
+    last_app_path = new_apps.sort_by(&File.method(:mtime)).last
+
+    Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH] = File.expand_path(last_hap_path) if last_hap_path
+    Actions.lane_context[:HVIGOR_APP_OUTPUT_PATH] = File.expand_path(last_app_path) if last_app_path
+  end
+```
+
+通过 Actions.lane_context 将打包产物路径进行传递，这样就可以在其他lane中读取了，同理 mapping 文件也可以是这个思路
+
+```ruby
+hap_path = Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH]
+```
+
+### 动态配置命令行工具
 
 上面的演示都是基于本地系统的命令行工具进行构建的，我们可以在 Jenkins 、gitlab job 或者 github workflow 中调用 fastlane 流水线，进行自动化构建。
 
@@ -526,11 +597,11 @@ fastlane build_hap
 | 6    | ohpm -v                                                       | 4           |
 | 7    | ohpm install --all                                            | 0           |
 | 8    | Switch to harmony hvigor lane                                 | 0           |
-| 9    | hvigorw                                                       | 1           |
+| 9    | hvigorw -v                                                    | 1           |
 | 10   | Switch to harmony hvigor lane                                 | 0           |
-| 11   | hvigorw                                                       | 2           |
+| 11   | hvigorw clean                                                 | 2           |
 | 12   | Switch to harmony hvigor lane                                 | 0           |
-| 13   | hvigorw                                                       | 29          |
+| 13   | hvigorw assembleHap --mode module --no-daemon -p product\=def | 29          |
 | 14   | Switch to harmony upload_to_minio lane                        | 0           |
 | 15   | mc cp /Users/dede/Workspace/Fake/HarmonyFastlaneDemo/entry/bu | 0           |
 | 16   | Switch to harmony push_msg lane                               | 0           |
@@ -544,6 +615,21 @@ fastlane build_hap
 ### 完整的 Fastfile
 
 ```ruby
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
 # 命令行工具
 COMMAND_LINE_TOOLS_PLATFORM = "mac-arm64"# 打包机的平台架构
 COMMAND_LINE_TOOLS_VERSION = "5.0.3.810"
@@ -602,10 +688,30 @@ platform :harmony do
     else
       cmds = ["hvigorw", task] + args
     end
+
     # 指定工作路径，fastlane 路径上一级，也就是项目的根路径
-    Dir.chdir("../") do
-      sh cmds
+    project_dir = "../"
+    Dir.chdir(project_dir) do
+      sh(*cmds)
     end
+
+    # 只处理打包task
+    if !(task =~ /\b(assemble)/)
+      next
+    end
+
+    # hap_path = File::expand_path("../entry/build/default/outputs/default/hm_fastlane_demo-unsigned.hap")
+    # app_path = File::expand_path("../build/outputs/default/hm_fastlane_demo-unsigned.app")
+    hap_search_path = File.join(project_dir, "**", "build", "**", "outputs", "**", "*.hap")
+    app_search_path = File.join(project_dir, "build", "outputs", "**", "*.app")
+    new_haps = Dir[hap_search_path].map { |path| File.expand_path(path) }
+    new_apps = Dir[app_search_path].map { |path| File.expand_path(path) }
+    
+    last_hap_path = new_haps.sort_by(&File.method(:mtime)).last
+    last_app_path = new_apps.sort_by(&File.method(:mtime)).last
+
+    Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH] = File.expand_path(last_hap_path) if last_hap_path
+    Actions.lane_context[:HVIGOR_APP_OUTPUT_PATH] = File.expand_path(last_app_path) if last_app_path
   end
 
   desc "上传文件到MinIO file_path: 文件路径, remote_path: 上传文件夹路径"
@@ -632,9 +738,7 @@ platform :harmony do
       args: ["--mode", "module", "--no-daemon"],
     )
 
-    # 在module级的build-profile.json5中指定产物名称
-    # "output": { "artifactName": "hm_fastlane_demo" }
-    hap_path = File::expand_path("../entry/build/default/outputs/default/hm_fastlane_demo-unsigned.hap")
+    hap_path = Actions.lane_context[:HVIGOR_HAP_OUTPUT_PATH]
     # 获取版本号
     version_name = JSON.parse(File.read("../AppScope/app.json5"))["app"]["versionName"]
     # 重命名
@@ -677,6 +781,7 @@ end
 ### 相关链接
 
 * [fastlane docs](https://docs.fastlane.tools/)
+* [fastlane gradle.rb](https://github.com/fastlane/fastlane/blob/master/fastlane/lib/fastlane/actions/gradle.rb)
 * [配置多目标产物](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V5/ide-customized-multi-targets-and-products-guides-V5)
 * [灵活定制编译选项](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V5/ide-hvigor-compilation-options-customizing-guide-V5)
 * [搭建流水线](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides-V5/ide-command-line-building-app-V5)
