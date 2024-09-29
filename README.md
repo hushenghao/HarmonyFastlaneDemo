@@ -260,7 +260,7 @@ module 级的 build-profile.json5 用于控制 Hap 的文件名
 }
 ```
 
-### 将 hvigorw 命令封装成 lane
+### 封装 hvigorw 命令
 
 既然已经知道了鸿蒙的打包命令，我们就可以将这些命令封装成fastlane 自定义 lane 来调用。
 
@@ -577,11 +577,6 @@ export HM_COMMAND_LINE_TOOLS_REPO="/Users/dede/Downloads/hm_cmdline_tools_repo"
 ```
 
 再次运行 `fastlane build_hap`
-
-```shell
-
-fastlane build_hap
-```
 
 ```log
 +------------------------------------------------------------------------------------+
